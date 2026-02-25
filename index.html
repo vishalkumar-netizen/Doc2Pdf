@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Document to PDF Converter</title>
+
+<!-- =============================
+     CDN LIBRARIES
+============================== -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #f4f6f8;
+  margin: 0;
+  padding: 0;
+}
+.container {
+  max-width: 900px;
+  margin: auto;
+  padding: 20px;
+}
+.card {
+  background: #fff;
+  padding: 25px;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+h1 {
+  text-align: center;
+}
+.drop-area {
+  border: 2px dashed #888;
+  border-radius: 10px;
+  padding: 40px;
+  text-align: center;
+  margin: 20px 0;
+  cursor: pointer;
+}
+.drop-area.dragover {
+  border-color: #000;
+  background: #fafafa;
+}
+button {
+  padding: 10px 18px;
+  margin: 10px 5px;
+  border: none;
+  border-radius: 6px;
+  background: #111;
+  color: #fff;
+  cursor: pointer;
+}
+button:disabled {
+  background: #aaa;
+}
+#status {
+  margin-top: 10px;
+  font-weight: bold;
+}
+.preview {
+  border: 1px solid #ddd;
+  padding: 20px;
+  margin-top: 20px;
+  background: white;
+  min-height: 100px;
+  word-wrap: break-word;
+}
+.notice {
+  margin-top: 15px;
+  font-size: 14px;
+  color: #444;
+  background: #eef5ff;
+  padding: 10px;
+  border-radius: 6px;
+}
+.instructions {
+  margin-top: 25px;
+  background: #f9f9f9;
+  padding: 15px;
+  border-radius: 8px;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+  <div class="card">
+    <h1>Document to PDF Converter</h1>
+
+    <div id="dropArea" class="drop-area">
+      Drag & Drop File Here<br />or Click to Select
+      <input type="file" id="fileInput" hidden />
+    </div>
+
+    <button id="convertBtn" disabled>Convert to PDF</button>
+    <button id="downloadBtn" disabled>Download PDF</button>
+
+    <div id="status"></div>
+
+    <div class="notice">
+      🔒 All files are processed locally in your browser. No file is uploaded to any server.
+    </div>
+
+    <div id="preview" class="preview"></div>
+
+    <div class="instructions">
+      <h3>How to Use</h3>
+      <ol>
+        <li>Upload or drag your document file.</li>
+        <li>Click <b>Convert to PDF</b>.</li>
+        <li>Wait for processing to complete.</li>
+        <li>Click <b>Download PDF</b> to save your file.</li>
+      </ol>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const { jsPDF } = window.jspdf;
+
+const dropArea = document.getElementById('dropArea');
+const fileInput = document.getElementById('fileInput');
+const convertBtn = document.getElementById('convertBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const statusText = document.getElementById('status');
+const preview = document.getElementById('preview');
+
+let generatedPDF = null;
+let uploadedFile = null;
+
+// =============================
+// Drag & Drop
+// =============================
+dropArea.addEventListener('click', () => fileInput.click());
+
+dropArea.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropArea.classList.add('dragover');
+});
+
+dropArea.addEventListener('dragleave', () => {
+  dropArea.classList.remove('dragover');
+});
+
+dropArea.addEventListener('drop', e => {
+  e.preventDefault();
+  dropArea.classList.remove('dragover');
+  handleFile(e.dataTransfer.files[0]);
+});
+
+fileInput.addEventListener('change', e => {
+  handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  uploadedFile = file;
+  statusText.textContent = "File loaded: " + file.name;
+  convertBtn.disabled = false;
+  downloadBtn.disabled = true;
+  preview.innerHTML = "";
+}
+
+// =============================
+// Conversion Logic
+// =============================
+convertBtn.addEventListener('click', async () => {
+  if (!uploadedFile) return;
+
+  statusText.textContent = "Processing...";
+  preview.innerHTML = "";
+
+  const ext = uploadedFile.name.split('.').pop().toLowerCase();
+
+  try {
+    const pdf = new jsPDF({
+      orientation: 'p',
+      unit: 'mm',
+      format: 'a4',
+      compress: true
+    });
+
+    if (ext === 'docx') {
+      const arrayBuffer = await uploadedFile.arrayBuffer();
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      preview.innerHTML = result.value;
+      
+      // Use jspdf's html method for high-fidelity, low-size text rendering
+      await pdf.html(preview, {
+        callback: function (doc) {
+          generatedPDF = doc;
+          finalizeSuccess();
+        },
+        margin: [15, 15, 15, 15],
+        autoPaging: 'text',
+        x: 0,
+        y: 0,
+        width: 180, // Target width in mm
+        windowWidth: 800 // Context width for CSS
+      });
+      return; // Exit here as pdf.html is async with callback
+    }
+    else if (ext === 'txt' || ext === 'rtf' || ext === 'html') {
+      const text = await uploadedFile.text();
+      preview.innerHTML = ext === 'html' ? text : `<pre>${text}</pre>`;
+      
+      // Direct text output for simple text/rtf to keep size minimal
+      const lines = pdf.splitTextToSize(preview.innerText, 180);
+      pdf.text(lines, 15, 20);
+      generatedPDF = pdf;
+    }
+    else if (['jpg','jpeg','png'].includes(ext)) {
+      const imgURL = URL.createObjectURL(uploadedFile);
+      preview.innerHTML = `<img src="${imgURL}" id="tempImg" style="max-width:100%">`;
+      
+      // For images, we must embed them, but we compress to JPEG
+      const canvas = await html2canvas(preview, { scale: 1 });
+      const imgData = canvas.toDataURL('image/jpeg', 0.75);
+      pdf.addImage(imgData, 'JPEG', 10, 10, 190, (canvas.height * 190) / canvas.width);
+      generatedPDF = pdf;
+    }
+    else {
+      throw new Error('Unsupported file format');
+    }
+
+    finalizeSuccess();
+  }
+  catch (err) {
+    statusText.textContent = "Error: " + err.message;
+    console.error(err);
+  }
+});
+
+function finalizeSuccess() {
+  statusText.textContent = "Conversion Successful ✅";
+  downloadBtn.disabled = false;
+}
+
+// =============================
+// Download
+// =============================
+downloadBtn.addEventListener('click', () => {
+  if (generatedPDF) {
+    generatedPDF.save('converted.pdf');
+  }
+});
+</script>
+</body>
+</html>
